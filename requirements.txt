@@ -1,0 +1,6 @@
+beautifulsoup4==4.13.4
+requests==2.32.4
+python-dotenv==1.1.1
+crewai== 0.150.0
+crewai-tools==0.58.0
+
