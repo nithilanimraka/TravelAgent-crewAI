@@ -17,6 +17,8 @@ load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI1_API_KEY = os.getenv("GEMINI1_API_KEY")
 
+GEMINIPRO_API_KEY = os.getenv("GEMINIPRO_API_KEY")
+
 OPENROUTER_API_KEY3=os.getenv("OPENROUTER_API_KEY3")
 OPENAI_API_BASE=os.getenv("OPENAI_API_BASE")
 
@@ -41,6 +43,15 @@ def initialize_llm1():
         provider="google",
         api_key=GEMINI_API_KEY
     )
+
+@lru_cache(maxsize=1)
+def initialize_llmPro():
+    """Initialize and cache the LLM instance to avoid repeated initializations."""
+    return LLM(
+        model="gemini/gemini-2.5-flash",
+        provider="google",
+        api_key=GEMINIPRO_API_KEY
+    )   
 
 
 
@@ -107,8 +118,34 @@ def geocode_city(city: str) -> tuple[float, float] | None:
 # Tool 2: Weather Tool (Updated for Forecast)
 bad_weather_codes = [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99]
 desc_map = {
-    0: "clear sky", 1: "mainly clear", 2: "partly cloudy", 3: "overcast", 45: "foggy", 51: "light drizzle", 
-    61: "rain", 71: "snow", 95: "thunderstorm"
+    0: "Clear sky",
+    1: "Mainly clear",
+    2: "Partly cloudy",
+    3: "Overcast",
+    45: "Fog",
+    48: "Fog depositing rime",
+    51: "Light drizzle",
+    53: "Moderate drizzle",
+    55: "Dense drizzle",
+    56: "Light freezing drizzle",
+    57: "Dense freezing drizzle",
+    61: "Slight rain",
+    63: "Moderate rain",
+    65: "Heavy rain",
+    66: "Light freezing rain",
+    67: "Heavy freezing rain",
+    71: "Slight snow",
+    73: "Moderate snow",
+    75: "Heavy snow",
+    77: "Snow grains",
+    80: "Slight rain showers",
+    81: "Moderate rain showers",
+    82: "Violent rain showers",
+    85: "Slight snow showers",
+    86: "Heavy snow showers",
+    95: "Thunderstorm",
+    96: "Thunderstorm with slight hail",
+    99: "Thunderstorm with heavy hail"
 }
 
 @tool("Weather Tool")
@@ -163,15 +200,48 @@ def get_conversion_rate(from_currency: str, to_currency: str) -> float | None:
 
 # Your existing tool can now be simplified
 @tool("Currency Conversion Tool")
-def currency_conversion_tool(from_currency: str, to_currency: str) -> str:
+def currency_conversion_tool(from_currency: str, to_currency: str, amount: str = "1") -> str:
     """
-    Returns the numerical conversion rate from one currency to another as a string.
+    Returns the conversion rate from one currency to another, or converts a specific amount.
+    
+    Args:
+        from_currency: The source currency code (e.g., "USD")
+        to_currency: The target currency code (e.g., "LKR")
+        amount: The amount to convert (default: "1" for just the rate)
+    
+    Returns:
+        A string with the conversion result in JSON format: {"rate": X.XXXX, "converted_amount": X.XX}
     """
-    rate = get_conversion_rate(from_currency, to_currency)
-    if rate:
-        return str(rate)
-    return f"Error converting currency. Ensure currency codes are correct."
+    try:
+        rate = get_conversion_rate(from_currency, to_currency)
+        if rate:
+            amount_float = float(amount)
+            converted_amount = amount_float * rate
+            return json.dumps({
+                "rate": rate,
+                "converted_amount": converted_amount
+            })
+        return json.dumps({"error": f"Error converting currency. Ensure currency codes are correct."})
+    except Exception as e:
+        return json.dumps({"error": f"Error converting currency: {str(e)}"})
 
+def format_currency(amount: float, currency_code: str) -> str:
+    """Format a currency amount with the appropriate number of decimal places and separators."""
+    # Most currencies use 2 decimal places
+    decimal_places = 2
+    
+    # Some currencies don't use decimal places
+    no_decimal_currencies = ["JPY", "KRW", "VND", "IDR", "CLP", "PYG", "HUF"]
+    if currency_code in no_decimal_currencies:
+        decimal_places = 0
+    
+    # Format with thousand separators and appropriate decimal places
+    if decimal_places == 0:
+        formatted = f"{int(round(amount)):,}"
+    else:
+        formatted = f"{amount:,.{decimal_places}f}"
+    
+    return f"{formatted} {currency_code}"
 
 print("Tools created successfully.")
 
@@ -265,6 +335,8 @@ def parse_budget_from_text(text: str) -> str:
         r'budget\s+of\s+(\d+(?:\s*,?\s*\d+)*)\s+(.+?)(?:\s|$)',
         # "my budget is 50000 rupees"
         r'my\s+budget\s+is\s+(\d+(?:\s*,?\s*\d+)*)\s+(.+?)(?:\s|$)',
+        # "the budget is 50000 LKR"
+        r'the\s+budget\s+is\s+(\d+(?:\s*,?\s*\d+)*)\s+(.+?)(?:\s|$)',
         # Just "50000 LKR" format
         r'(\d+(?:\s*,?\s*\d+)*)\s+([a-z]{3})(?:\s|$)',
     ]
@@ -367,7 +439,7 @@ def extract_json_from_response(response_text: str) -> dict:
 
 def create_setup_crew(initial_prompt: str):
     """Creates the crew responsible for gathering user requirements."""
-    llm = initialize_llm1() # Use a fast and reliable LLM for conversation
+    llmpro = initialize_llmPro() # Use a fast and reliable LLM for conversation
 
     current_date = datetime.now().strftime('%Y-%m-%d')
 
@@ -380,7 +452,7 @@ def create_setup_crew(initial_prompt: str):
                   "dream vacation. You are programmed to ask clarifying questions one by one "
                   "until you have all the information needed to create a travel plan.",
         tools=[human_input_tool],
-        llm=llm,
+        llm=llmpro,
         verbose=True
     )
 
@@ -409,7 +481,7 @@ def create_setup_crew(initial_prompt: str):
         - Location: Look for place names (e.g., "mirissa" → "Mirissa, Sri Lanka")
         - Number of people: Look for numbers + "people" (e.g., "8 people" → "8")  
         - Interests: Look for activities/preferences and additional details in the prompt. Get the whole portion of the prompt related to interests (eg: "I want to go to mirissa. i would like a villa with a pool. and some clubbing in the night. and also i want to explore mirissa. make the food as cheap as possible and save my budget for other stuff. This is for 5 people and the budget is 50000 LKR: i would like a villa with a pool. and some clubbing in the night. and also i want to explore mirissa. make the food as cheap as possible and save my budget for other stuff")
-        - Budget: Look for money amounts
+        - Budget: Look for money amounts in the format "AMOUNT CURRENCY" (e.g., "50000 LKR")
         - **Travel Dates**: Look for date references in ANY format:
            * "september 6th and come back on 7th september" → "2025-09-06 to 2025-09-07"
            * "august 5th to 6th" → "2025-08-05 to 2025-08-06"
@@ -417,9 +489,16 @@ def create_setup_crew(initial_prompt: str):
            * Always assume year 2025 unless specified otherwise
            * If dates indicate flexibility (like "no preferred date", "flexible", "any time"), set to "flexible"
         - Currency preferences: Look for currency mentions
+
+        **CRITICAL BUDGET EXTRACTION INSTRUCTIONS:**
+        - When extracting budget, you MUST include both the amount AND the currency code
+        - For example, if the prompt says "budget is 50000 LKR", the budget value should be "50000 LKR"
+        - Do NOT separate the amount and currency - they must be together in one string
+        - The budget format must be "AMOUNT CURRENCY" (e.g., "50000 LKR", "250 USD")
         
-        **IMPORTANT DATE EXTRACTION EXAMPLES:**
+        **CRITICAL DATE EXTRACTION EXAMPLES:**
         - "planning to travel on september 6th and come back on 7th september" → "2025-09-06 to 2025-09-07"
+        - planning to travel from september 6th to 7th september" → "2025-09-06 to 2025-09-07"
         - "going from august 15 to august 20" → "2025-08-15 to 2025-08-20"
         - "travel in december 25th to 28th" → "2025-12-25 to 2025-12-28"
 
@@ -503,7 +582,7 @@ def invoke_agent(location, interests, budget, num_people, travel_dates, preferre
             if rate_to_usd:
                 budget_in_usd = budget_amount * rate_to_usd
         
-        budget_instruction = f"The total available budget is {budget_in_usd:.2f} USD. All suggested activities and accommodation must fit within this budget."
+        budget_instruction = f"The total available budget is {budget_in_usd:.2f} USD. All suggested activities and accommodation must fit within this budget and should be **CLOSE** and MUST BE LESS THAN OR EQUAL to the budget."
 
     # Determine local currency
     country = location.split(',')[-1].strip()
@@ -568,7 +647,7 @@ def invoke_agent(location, interests, budget, num_people, travel_dates, preferre
     travel_concierge_agent = Agent(
         role='Head Travel Concierge',
         goal='Synthesize all gathered information into a cohesive, beautifully formatted travel itinerary with weather insights and converted costs.',
-        backstory='A world-class concierge from a five-star hotel, known for creating personalized and delightful travel experiences.',
+        backstory='A world-class concierge from a five-star hotel, known for creating personalized and delightful travel experiences. You are meticulous about financial accuracy and ensure all currency conversions are precise and consistent',
         tools=[currency_conversion_tool],  # Added for cost conversion
         llm=llm1_model,
         allow_delegation=False,
@@ -590,6 +669,9 @@ def invoke_agent(location, interests, budget, num_people, travel_dates, preferre
     task_find_city_info = Task(
         description=f"""
         For a group of {num_people} people traveling to {location} with interests in '{interests}'.
+
+        **TRAVEL DATES:** {travel_dates}
+
         {budget_instruction}
         {accommodation_instruction}
 
@@ -617,7 +699,7 @@ def invoke_agent(location, interests, budget, num_people, travel_dates, preferre
     task_verify_budget = Task(
         description=f"""Analyze the research from the city expert.
         {budget_instruction}
-        Sum up the total estimated cost of ALL items (activities and accommodation) provided by the researcher.Compare this total to the available USD budget. Provide a clear 'go' or 'no-go' verdict with a brief justification. The user's original budget was '{budget}'.""",
+        Sum up the total estimated cost of ALL items (activities and accommodation) provided by the researcher.Compare this total to the available USD budget. Provide a clear 'go' or 'no-go' verdict with a brief justification. The user's original budget was '{budget_in_usd}'.""",
         expected_output="A budget feasibility verdict (Go/No-Go) comparing the total estimated cost in USD against the total available budget in USD.",
         agent=budget_verifier_agent,
         context=[task_find_city_info]
@@ -627,6 +709,8 @@ def invoke_agent(location, interests, budget, num_people, travel_dates, preferre
     task_compile_report = Task(
         description=f"""
         Create a final, human-readable travel itinerary for {num_people} people for a trip to {location}.
+
+        **TRAVEL DATES:** {travel_dates}
         
         **Handle flexible dates:** If travel dates are "flexible", mention this prominently and suggest the best seasons to visit {location} with reasons (weather, prices, crowds, etc.).
 
@@ -634,16 +718,21 @@ def invoke_agent(location, interests, budget, num_people, travel_dates, preferre
 
         Your report must:
         1.  First, use the Currency Conversion Tool ONCE to get the numerical conversion rate from USD to {target_currency}.
-        2.  Iterate through the items from the parsed JSON. For each item, use the rate to convert its 'cost_usd' to {target_currency}.
-            **When displaying the cost, show ONLY the final converted amount. Do NOT show the original USD cost or the mathematical calculation used to arrive at the final price.**
-            For example, instead of writing "Cost: 100 USD x 301.95 = 30,195 LKR", you MUST write "Cost: 30,195 LKR".
-        3.  For every activity/ meal (eg: breakfast, lunch, dunner)/  scenary or literally anything, **YOU MUST mention the cost if the user has to pay for it**.   
-        4.  Synthesize the parsed items into a cohesive, daily plan.
-        5.  **Important:** Do NOT display the 'USD to {target_currency}' conversion rate in the report if the user's original budget was already provided in {target_currency}. Only show the conversion rate if the original budget currency was different from the final report currency.
-        6.  Incorporate the budget verification verdict from the context.
-        7.  Include the weather insights if available. If specific weather data was fetched, incorporate it. If dates are flexible, provide seasonal recommendations instead.
-        8.  At the end of the report, give a budget summary of the total cost of the trip in {target_currency}.
-        9.  Format the entire output as a beautiful and exciting markdown report. Display all final costs ONLY in {target_currency}.
+        2.  Parse the JSON response from the tool to extract the exact conversion rate.
+        3.  Store this rate and use it consistently for ALL currency conversions in your report.
+        4.  For each item in the parsed JSON:
+            a. Extract the 'cost_usd' value
+            b. Multiply it by the stored conversion rate to get the exact amount in {target_currency}
+            c. Format the result as "X,XXX.XX {target_currency}" (with appropriate decimal places)
+            d. **When displaying the cost, show ONLY the final converted amount. Do NOT show the original USD cost or the mathematical calculation used to arrive at the final price.**
+            For example, instead of writing "Cost: 100 USD x 301.95 = 30,195 LKR", you MUST write "Cost: 30,195 LKR"..
+        5.  For every activity/ meal (eg: breakfast, lunch, dunner)/  scenary or literally anything, **YOU MUST mention the cost if the user has to pay for it**.   
+        6.  Synthesize the parsed items into a cohesive, daily plan.
+        7.  **Important:** Do NOT display the 'USD to {target_currency}' conversion rate in the report if the user's original budget was already provided in {target_currency}. Only show the conversion rate if the original budget currency was different from the final report currency.
+        8.  Incorporate the budget verification verdict from the context.
+        9.  Include the weather insights if available. If specific weather data was fetched, incorporate it. If dates are flexible, provide seasonal recommendations instead.
+        10.  At the end of the report, give a budget summary of the total cost of the trip in {target_currency}.
+        11.  Format the entire output as a beautiful and exciting markdown report. Display all final costs ONLY in {target_currency}.
         """,
         expected_output=f"A complete, beautifully formatted markdown report with a travel plan, budget analysis, and weather/seasonal insights. All costs must be in {target_currency} and must not show any calculations.",
         agent=travel_concierge_agent,
@@ -677,7 +766,7 @@ def run_travel_chatbot():
     """The main entry point for the conversational travel agent."""
     
     # 1. Get initial prompt from the user
-    initial_prompt = "I want to go to mirissa. planning to travel from september 6th to 7th september. i would like a villa with a pool. and some beach exploration and fun in beach. and also i want to explore mirissa. make the food as cheap as possible and save my budget for other stuff. This is for 5 people and the budget is 50000 LKR"
+    initial_prompt = "I want to go to mirissa. planning to travel from august 6th to 7th. i would like a villa with a pool. and some beach exploration and fun in beach. and also i want to explore mirissa. make the food as cheap as possible and save my budget for other stuff. This is for 5 people and the budget is 50000 LKR"
 
     # 2. Run the Setup Crew to gather all details - PASS THE PROMPT DIRECTLY
     setup_crew = create_setup_crew(initial_prompt)
