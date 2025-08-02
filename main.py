@@ -128,8 +128,18 @@ def run_crew_task(session_id: str, initial_prompt: str):
         sessions[session_id]["status"] = "setup_complete"
         
         result_object = invoke_agent(**trip_details)
-        sessions[session_id]["result"] = result_object.raw if hasattr(result_object, 'raw') else str(result_object)
+        raw_result = result_object.raw if hasattr(result_object, 'raw') else str(result_object)
+
+        # --- THIS IS THE FIX ---
+        # Clean the raw markdown output to remove code fences
+        cleaned_result = re.sub(r'^```markdown\n', '', raw_result)
+        cleaned_result = re.sub(r'```$', '', cleaned_result)
+        cleaned_result = cleaned_result.strip()
+        # --- END OF FIX ---
+
+        sessions[session_id]["result"] = cleaned_result # Store the cleaned result
         sessions[session_id]["status"] = "completed"
+        
     except Exception as e:
         print(f"Error in background task for session {session_id}: {e}")
         import traceback

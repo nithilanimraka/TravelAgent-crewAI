@@ -684,6 +684,7 @@ def invoke_agent(location, interests, budget, num_people, travel_dates, preferre
 
         **IMPORTANT CONTEXT USAGE:** You will receive context from a data specialist that includes a real-time currency conversion rate. If you find prices online in a local currency (e.g., INR, LKR), you **must use the precise conversion rate provided in your context** to convert them to USD for your analysis and final JSON output. This is more accurate than using your general knowledge.
 
+        **CRITICAL INSTRUCTION**: For each item you research (especially accommodation, restaurants, and specific activities), you MUST use the search tool to find a relevant webpage (like a booking page, official website, or Google Maps link) and include it in the 'link' field of your JSON output. If no direct link is available, you can set the value to "null".
         The TOTAL estimated cost of all researched items (in USD) must not exceed this budget and also should be close to this budget.
 
         **Your instructions are to be highly efficient. Aim to use the web search tool no more than 2-3 times.**
@@ -693,10 +694,10 @@ def invoke_agent(location, interests, budget, num_people, travel_dates, preferre
         2.  {accommodation_instruction} 
 
         Your final answer MUST be a single JSON string. This JSON object should contain a key "items" which is a list of dictionaries, and a key "total_estimated_cost_usd".
-        Each dictionary in the "items" list must have the keys: "type" (string, e.g., "accommodation" or "activity"), "name" (string), "description" (string), and "cost_usd" (number).
+        Each dictionary in the "items" list must have the keys: "type" (string, e.g., "accommodation" or "activity"), "name" (string), "description" (string), "cost_usd" (number), and "link" (string or null).
         """,
         expected_output="""A single, valid JSON string that can be directly parsed. Example format: 
-        '{"items": [{"type": "accommodation", "name": "Mirissa Beach Villa", "description": "A beautiful villa with a pool for 4 guests.", "cost_usd": 150}, {"type": "activity", "name": "Whale Watching Tour", "description": "A 4-hour whale watching excursion.", "cost_usd": 80}], "total_estimated_cost_usd": 230}'
+        '{"items": [{"type": "accommodation", "name": "Mirissa Beach Villa", "description": "A beautiful villa with a pool for 4 guests.", "cost_usd": 150, "link": "https://example.com/villa"}, {"type": "activity", "name": "Whale Watching Tour", "description": "A 4-hour whale watching excursion.", "cost_usd": 80, "link": "https://example.com/whale-watching"}], "total_estimated_cost_usd": 230}'
         """,
         agent=city_expert_agent,
         context=[task_get_local_data]
@@ -732,7 +733,9 @@ def invoke_agent(location, interests, budget, num_people, travel_dates, preferre
             b. Multiply it by the stored conversion rate to get the exact amount in {target_currency}
             c. Format the result as "X,XXX.XX {target_currency}" (with appropriate decimal places)
             d. **When displaying the cost, show ONLY the final converted amount. Do NOT show the original USD cost or the mathematical calculation used to arrive at the final price.**
-            For example, instead of writing "Cost: 100 USD x 301.95 = 30,195 LKR", you MUST write "Cost: 30,195 LKR"..
+               For example, instead of writing "Cost: 100 USD x 301.95 = 30,195 LKR", you MUST write "Cost: 30,195 LKR"..
+            e. **If the item has a 'link' that is not "null", you MUST format it as a clickable markdown link.**
+               For example, if the name is "Mirissa Beach Villa" and the link is "https://example.com/villa", you must provide the clickable link near the name.
         5.  For every activity/ meal (eg: breakfast, lunch, dunner)/  scenary or literally anything, **YOU MUST mention the cost if the user has to pay for it**.   
         6.  Synthesize the parsed items into a cohesive, daily plan.
         7.  **Important:** Do NOT display the 'USD to {target_currency}' conversion rate in the report if the user's original budget was already provided in {target_currency}. Only show the conversion rate if the original budget currency was different from the final report currency.
