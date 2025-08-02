@@ -80,6 +80,11 @@ class UserCreate(BaseModel):
 class UserInDB(UserCreate):
     hashed_password: str
 
+ # --- NEW: Pydantic Model for Login ---
+class UserLogin(BaseModel):
+    email: str
+    password: str   
+
 # In-memory session storage
 sessions: Dict[str, Dict[str, Any]] = {}
 
@@ -119,7 +124,30 @@ async def signup(user: UserCreate):
     # Insert new user into the database
     users_collection.insert_one(user_data)
     
-    return {"message": "User created successfully"}   
+    return {"message": "User created successfully"}
+
+ # --- NEW: Login Endpoint ---
+@app.post("/auth/login")
+async def login(user: UserLogin):
+    # Find user in the database
+    db_user = users_collection.find_one({"email": user.email})
+    
+    # Check if user exists and password is correct
+    if not db_user or not pwd_context.verify(user.password, db_user["hashed_password"]):
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+        
+    # On successful login, return user info (excluding password)
+    return {
+        "message": "Login successful",
+        "user": {
+            "name": db_user["name"],
+            "email": db_user["email"],
+        }
+    }      
 
 # This function will run in the background
 def run_crew_task(session_id: str, initial_prompt: str):
